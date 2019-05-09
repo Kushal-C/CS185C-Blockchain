@@ -1,10 +1,11 @@
-mport hashlib
+import hashlib
 import json
 from time import time
 from urllib.parse import urlparse
 from uuid import uuid4
 
 import requests
+import secrets
 from flask import Flask, jsonify, request
 
 
@@ -12,6 +13,7 @@ class Blockchain:
     def __init__(self):
         self.current_transactions = []
         self.chain = []
+        self.registered_accounts = {}
         self.nodes = set()
 
         # Create the genesis block
@@ -117,7 +119,7 @@ class Blockchain:
         self.chain.append(block)
         return block
 
-    def new_transaction(self, sender, recipient, amount):
+    def new_transaction(self, sender, recipient, amount, message):
         """
         Creates a new transaction to go into the next mined Block
         :param sender: Address of the Sender
@@ -125,12 +127,19 @@ class Blockchain:
         :param amount: Amount
         :return: The index of the Block that will hold this transaction
         """
+        print(self.registered_accounts)
+        index = self.last_block['index'] + 1
+        arr = self.registered_accounts[recipient]
+        arr.append(index)
+        print(arr)
+        self.registered_accounts[recipient] = arr
         self.current_transactions.append({
             'sender': sender,
             'recipient': recipient,
             'amount': amount,
+            'message': message
         })
-
+        print("Transaction will be added to Block " + str(index))
         return self.last_block['index'] + 1
 
     @property
@@ -181,7 +190,6 @@ class Blockchain:
         guess_hash = hashlib.sha256(guess).hexdigest()
         return guess_hash[:4] == "0000"
 
-
 # Instantiate the Node
 app = Flask(__name__)
 
@@ -191,20 +199,16 @@ node_identifier = str(uuid4()).replace('-', '')
 # Instantiate the Blockchain
 blockchain = Blockchain()
 
+print("Pre-registered accounts")
+blockchain.registered_accounts = {'1': [], '2': []}
+
+
 
 @app.route('/mine', methods=['GET'])
 def mine():
     # We run the proof of work algorithm to get the next proof...
     last_block = blockchain.last_block
     proof = blockchain.proof_of_work(last_block)
-
-    # We must receive a reward for finding the proof.
-    # The sender is "0" to signify that this node has mined a new coin.
-    blockchain.new_transaction(
-        sender="0",
-        recipient=node_identifier,
-        amount=1,
-    )
 
     # Forge the new Block by adding it to the chain
     previous_hash = blockchain.hash(last_block)
@@ -219,18 +223,39 @@ def mine():
     }
     return jsonify(response), 200
 
+@app.route('/retrieve/<block_id>/<recipient>', methods=['GET'])
+def retrieve(block_id, recipient):
+    for block in blockchain.chain:
+        if int(block['index']) == int(block_id):
+            for transaction in block['transactions']:
+                if transaction['recipient'] == recipient:
+                    print("Found message :" + str(transaction['message']))
+                    print(transaction['message'])
+                    return transaction['message']
+    
+    print("No Transactions found")
+    return None
 
-@app.route('/transactions/new', methods=['POST'])
-def new_transaction():
-    values = request.get_json()
+@app.route('/register', methods=['GET'])
+def register():
+    
+    random_key = secrets.randbits(20)
+    address = hash(random_key)
+    response = {'address': address}
+    blockchain.registered_accounts[address] = []
+    return jsonify(response), 200
+
+
+@app.route('/transactions/<sender>/<recipient>/<message>/<amount>', methods=['POST'])
+def new_transaction(sender,recipient,message,amount):
 
     # Check that the required fields are in the POST'ed data
-    required = ['sender', 'recipient', 'amount']
-    if not all(k in values for k in required):
-        return 'Missing values', 400
+    #required = ['sender', 'recipient', 'amount', 'message']
+    #if not all(k in values for k in required):
+    #    return 'Missing values', 400
 
     # Create a new Transaction
-    index = blockchain.new_transaction(values['sender'], values['recipient'], values['amount'])
+    index = blockchain.new_transaction(sender, recipient, amount, message)
 
     response = {'message': f'Transaction will be added to Block {index}'}
     return jsonify(response), 201
@@ -244,6 +269,11 @@ def full_chain():
     }
     return jsonify(response), 200
 
+@app.route('/messages/<address>', methods=['GET'])
+def get_messages(address):
+    message_ids = blockchain.registered_accounts[address]
+    return jsonify(message_ids) , 200
+    
 
 @app.route('/nodes/register', methods=['POST'])
 def register_nodes():
