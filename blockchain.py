@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import requests
+from cryptography.fernet import Fernet
 import secrets
 from flask import Flask, jsonify, request
 
@@ -119,6 +120,18 @@ class Blockchain:
         self.chain.append(block)
         return block
 
+    def retrieve(self, block_index, recipient):
+        for block in self.chain:
+            if int(block['index']) == int(block_index):
+                for transaction in block['transactions']:
+                    if transaction['recipient'] == recipient:
+                        print("Found message :" + str(transaction['message']))
+                        print(transaction['message'])
+                        return transaction['message']
+        
+        print("No Transactions found")
+        return None
+
     def new_transaction(self, sender, recipient, amount, message):
         """
         Creates a new transaction to go into the next mined Block
@@ -127,6 +140,11 @@ class Blockchain:
         :param amount: Amount
         :return: The index of the Block that will hold this transaction
         """
+        key = Fernet.generate_key()
+        encoded_message = message.encode()
+        f = Fernet(key)
+        encrypted = f.encrypt(encoded_message)
+
         print(self.registered_accounts)
         index = self.last_block['index'] + 1
         arr = self.registered_accounts[recipient]
@@ -137,7 +155,7 @@ class Blockchain:
             'sender': sender,
             'recipient': recipient,
             'amount': amount,
-            'message': message
+            'message': str(encrypted)
         })
         print("Transaction will be added to Block " + str(index))
         return self.last_block['index'] + 1
@@ -225,24 +243,14 @@ def mine():
 
 @app.route('/retrieve/<block_id>/<recipient>', methods=['GET'])
 def retrieve(block_id, recipient):
-    for block in blockchain.chain:
-        if int(block['index']) == int(block_id):
-            for transaction in block['transactions']:
-                if transaction['recipient'] == recipient:
-                    print("Found message :" + str(transaction['message']))
-                    print(transaction['message'])
-                    return transaction['message']
-    
-    print("No Transactions found")
-    return None
+    return blockchain.retrieve(block_id,recipient)
 
 @app.route('/register', methods=['GET'])
 def register():
-    
     random_key = secrets.randbits(20)
     address = hash(random_key)
     response = {'address': address}
-    blockchain.registered_accounts[address] = []
+    blockchain.registered_accounts[str(address)] = []
     return jsonify(response), 200
 
 
